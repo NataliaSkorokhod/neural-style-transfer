@@ -1,5 +1,4 @@
 from __future__ import print_function
-import tensorflow as tf
 from keras.preprocessing.image import load_img, save_img, img_to_array
 import numpy as np
 from scipy.optimize import fmin_l_bfgs_b
@@ -7,9 +6,8 @@ import time
 from keras.applications import vgg19
 from keras import backend as K
 
-# VGG19 summary for reference:
-
-"""_________________________________________________________________
+""" VGG19 summary for reference:
+_________________________________________________________________
 Layer (type)                 Output Shape              Param #   
 =================================================================
 input_1 (InputLayer)         (None, 3, 224, 224)       0         
@@ -65,18 +63,23 @@ _________________________________________________________________
 predictions (Dense)          (None, 1000)              4097000   
 """
 
-base_image_path = 'sakura.JPG'
-style_reference_image_path1 = 'watercolor1.jpg'
-style_reference_image_path2 = 'watercolor2.jpg'
-style_reference_image_path3 = 'watercolor3.jpg'
+# base image - the image we want to transfer
+base_image_path = 'hula_valley.jpg'
 
-style_coeff = np.array([0.5, 0.4, 0.1]) # weights given to each of the style reference paintings
+# style reference(s) - the images from which we want to capture the style
+style_reference_image_paths = ['1.JPG', 'reflections.jpg']
+num_style_references = len(style_reference_image_paths)
+
+# weights given to each of the style reference paintings
+style_coeff = np.array([0.3, 0.7])
+assert(len(style_coeff) == num_style_references), \
+    "Number of style references and number of corresponding coefficients don't match!"
 
 iterations = 200
 
 # these are the weights of the different loss components
-style_weight = 0.5            # style image contribution to created image
-content_weight = 0.5          # content image contribution to created image
+content_weight = 0.7          # content image contribution to created image
+style_weight = 0.3            # style image contribution to created image
 
 # dimensions of the generated picture.
 width, height = load_img(base_image_path).size
@@ -111,9 +114,6 @@ def deprocess_image(x):
 
 # get tensor representations of our images
 base_image = K.variable(preprocess_image(base_image_path))
-style_reference_image1 = K.variable(preprocess_image(style_reference_image_path1))
-style_reference_image2 = K.variable(preprocess_image(style_reference_image_path2))
-style_reference_image3 = K.variable(preprocess_image(style_reference_image_path3))
 
 # this will contain our generated image.
 if K.image_data_format() == 'channels_first':
@@ -121,12 +121,22 @@ if K.image_data_format() == 'channels_first':
 else:
     combination_image = K.placeholder((1, img_nrows, img_ncols, 3))
 
-# combine the 3 images into a single Keras tensor
-input_tensor = K.concatenate([base_image,
-                              style_reference_image1,
-                              style_reference_image2,
-                              style_reference_image3,
+# creating a tensor which combines the base image,
+# all the style references, and the combination image.
+
+# base image
+input_tensor = base_image
+
+# add style reference images
+for path in style_reference_image_paths:
+    style_reference_image = K.variable(preprocess_image(path))
+    input_tensor = K.concatenate([input_tensor,
+                                 style_reference_image], axis=0)
+
+# add combination image
+input_tensor = K.concatenate([input_tensor,
                               combination_image], axis=0)
+
 
 # build the VGG19 network with our 3 images as input
 # the model will be loaded with pre-trained ImageNet weights
@@ -185,15 +195,15 @@ loss = loss + content_weight * content_loss(base_image_features,
 
 feature_layers = [
     ('block4_conv1', 0.2),
-    ('block4_conv2', 0.3),
+    ('block3_conv4', 0.3),
     ('block3_conv1', 0.5)]
 
 for layer_name, layer_coeff in feature_layers:
     layer_features = outputs_dict[layer_name]
-    style_reference_features = layer_features[1:-1, :, :, :]
+    style_reference_features = layer_features[1:-1, :, :, :] # if there are several style references, this is nontrivial
     combination_features = layer_features[-1, :, :, :]
 
-    for i in range(0, 3):
+    for i in range(0, num_style_references):
         loss = loss + style_weight * layer_coeff * style_coeff[i] * style_loss(style_reference_features[i], combination_features)
 
 # get the gradients of the generated image wrt the loss
@@ -255,14 +265,15 @@ evaluator = Evaluator()
 # so as to minimize the neural style loss
 x = preprocess_image(base_image_path)
 
+# where to save the generated images
 name_prefix = 'output/created_image'
 
-for i in range(iterations):
+for i in range(iterations + 1):
     print('Start of iteration', i)
     start_time = time.time()
 
     x, min_val, info = fmin_l_bfgs_b(evaluator.loss, x.flatten(),
-                                    fprime=evaluator.grads, maxfun=20)
+                                     fprime=evaluator.grads, maxfun=20)
 
     print('Current loss value:', min_val)
 
