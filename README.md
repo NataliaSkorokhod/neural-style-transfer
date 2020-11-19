@@ -1,4 +1,5 @@
-# neural-style-transfer
+#Neural Style Transfer
+
 Creating artistic images via neural style transfer.
 
 
